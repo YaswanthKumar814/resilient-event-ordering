@@ -1,3 +1,4 @@
+const cors = require('cors');
 const express = require("express");
 const { createRedisClients } = require("../event-bus/redisClient");
 const { connectToDatabase } = require("../shared/db");
@@ -8,7 +9,16 @@ const EventRaw = require("./models/EventRaw");
 const EventOrdered = require("./models/EventOrdered");
 const { buildOrderedRecords } = require("./orderingEngine");
 
+
 const app = express();
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type"]
+  })
+);
+app.options("*", cors());
 app.use(express.json());
 
 const collectorPort = Number(process.env.COLLECTOR_PORT || 4000);
@@ -22,13 +32,17 @@ async function persistOrderedTimeline(orderId) {
     }))
   );
 
-  await EventOrdered.deleteMany({ order_id: orderId });
-
   if (ordered.length) {
-    await EventOrdered.insertMany(
+    await EventOrdered.bulkWrite(
       ordered.map((event) => ({
-        ...event,
-        physical_timestamp: new Date(event.physical_timestamp)
+        replaceOne: {
+          filter: { event_id: event.event_id },
+          replacement: {
+            ...event,
+            physical_timestamp: new Date(event.physical_timestamp)
+          },
+          upsert: true
+        }
       }))
     );
   }

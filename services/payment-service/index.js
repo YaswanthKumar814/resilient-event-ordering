@@ -5,7 +5,14 @@ const service = createService({
   serviceName: SERVICES.PaymentService.name,
   port: SERVICES.PaymentService.port,
   endpoint: "/pay",
-  eventSequence: ["PAYMENT_SUCCESS"]
+  eventSequence: ["PAYMENT_SUCCESS"],
+  downstreamServices: [
+    {
+      name: SERVICES.RestaurantService.name,
+      port: SERVICES.RestaurantService.port,
+      endpoint: "/prepare"
+    }
+  ]
 });
 
 service.start();

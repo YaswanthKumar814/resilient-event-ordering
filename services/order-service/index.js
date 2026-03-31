@@ -11,16 +11,6 @@ const service = createService({
       name: SERVICES.PaymentService.name,
       port: SERVICES.PaymentService.port,
       endpoint: "/pay"
-    },
-    {
-      name: SERVICES.RestaurantService.name,
-      port: SERVICES.RestaurantService.port,
-      endpoint: "/prepare"
-    },
-    {
-      name: SERVICES.DeliveryService.name,
-      port: SERVICES.DeliveryService.port,
-      endpoint: "/deliver"
     }
   ]
 });
