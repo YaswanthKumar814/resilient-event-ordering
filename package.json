@@ -1,0 +1,37 @@
+{
+  "name": "distributed-event-ordering",
+  "version": "1.0.0",
+  "description": "Simulation of a resilient distributed event ordering system using Lamport and vector clocks.",
+  "main": "event-collector/collector.js",
+  "scripts": {
+    "start:order": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'services/order-service/index.js'));\"",
+    "start:payment": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'services/payment-service/index.js'));\"",
+    "start:restaurant": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'services/restaurant-service/index.js'));\"",
+    "start:delivery": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'services/delivery-service/index.js'));\"",
+    "start:collector": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'event-collector/collector.js'));\"",
+    "start:all": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'scripts/startAll.js'));\"",
+    "dev": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'scripts/startAll.js'));\"",
+    "check": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'scripts/check.js'));\""
+  },
+  "keywords": [
+    "distributed-systems",
+    "lamport-clock",
+    "vector-clock",
+    "redis",
+    "mongodb",
+    "simulation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.8.4",
+    "express": "^4.21.2",
+    "joi": "^17.13.3",
+    "mongoose": "^8.13.0",
+    "redis": "^4.7.0",
+    "uuid": "^11.1.0"
+  }
+}
