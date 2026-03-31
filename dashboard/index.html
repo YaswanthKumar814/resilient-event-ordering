@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Distributed Event Ordering Dashboard</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Collector Timeline Viewer</p>
+          <h1>Distributed Event Ordering Dashboard</h1>
+          <p class="subtitle">
+            Visualize ordered events exactly as returned by the collector timeline API.
+          </p>
+        </div>
+        <div class="summary-card">
+          <span class="summary-label">Total Events</span>
+          <strong id="total-count">0</strong>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel controls-panel">
+          <div class="controls">
+            <label for="order-id">Order ID</label>
+            <div class="controls-row">
+              <input
+                id="order-id"
+                name="order-id"
+                type="text"
+                placeholder="Enter order id"
+                autocomplete="off"
+              />
+              <button id="load-button" type="button">Load Timeline</button>
+              <button id="refresh-button" type="button" class="secondary">
+                Start Auto Refresh
+              </button>
+            </div>
+          </div>
+
+          <div class="status-row">
+            <span id="status-message" class="status-message">Ready</span>
+            <span id="last-updated" class="last-updated"></span>
+          </div>
+        </section>
+
+        <section class="panel timeline-panel">
+          <div class="section-header">
+            <h2>Timeline</h2>
+          </div>
+          <div id="timeline" class="timeline" aria-live="polite"></div>
+        </section>
+
+        <section class="panel raw-panel">
+          <div class="section-header">
+            <h2>Raw JSON</h2>
+            <button id="toggle-json-button" type="button" class="secondary">
+              Show JSON
+            </button>
+          </div>
+          <pre id="raw-json" class="raw-json hidden"></pre>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+  </html>
