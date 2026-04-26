@@ -2,39 +2,75 @@ const { spawn } = require("child_process");
 const path = require("path");
 
 const services = [
-  { name: "collector", file: "event-collector/collector.js" },
-  { name: "order-service", file: "services/order-service/index.js" },
-  { name: "payment-service", file: "services/payment-service/index.js" },
-  { name: "restaurant-service", file: "services/restaurant-service/index.js" },
-  { name: "delivery-service", file: "services/delivery-service/index.js" }
+  { name: "collector", file: "event-collector/collector.js", startupDelayMs: 0 },
+  { name: "order-service", file: "services/order-service/index.js", startupDelayMs: 800 },
+  { name: "payment-service", file: "services/payment-service/index.js", startupDelayMs: 1200 },
+  { name: "restaurant-service", file: "services/restaurant-service/index.js", startupDelayMs: 1600 },
+  { name: "delivery-service", file: "services/delivery-service/index.js", startupDelayMs: 2000 }
 ];
 
 const children = [];
+let shuttingDown = false;
+
+function log(message) {
+  console.log(`[start:all] ${message}`);
+}
 
 function startProcess(service) {
+  log(`Starting ${service.name} from ${service.file}`);
+
   const child = spawn(process.execPath, [path.join(__dirname, "..", service.file)], {
     stdio: "inherit",
     env: process.env
   });
 
-  children.push(child);
-  child.on("exit", (code) => {
-    console.log(`[orchestrator] ${service.name} exited with code ${code}`);
+  children.push({ service, child });
+
+  child.on("spawn", () => {
+    log(`${service.name} process spawned`);
+  });
+
+  child.on("error", (error) => {
+    log(`${service.name} failed to start: ${error.message}`);
+  });
+
+  child.on("exit", (code, signal) => {
+    const reason = signal ? `signal ${signal}` : `exit code ${code}`;
+    log(`${service.name} stopped with ${reason}`);
+
+    if (!shuttingDown && code && code !== 0) {
+      log(`${service.name} exited unexpectedly. Check the logs above for the failure reason.`);
+    }
   });
 }
 
-for (const service of services) {
-  startProcess(service);
+function scheduleStartup() {
+  log("Bootstrapping collector and services");
+  log("Make sure Redis and MongoDB are already running before using this command.");
+
+  for (const service of services) {
+    setTimeout(() => startProcess(service), service.startupDelayMs);
+  }
 }
 
 function shutdown() {
-  for (const child of children) {
-    if (!child.killed) {
-      child.kill("SIGINT");
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+  log("Shutting down all spawned services");
+
+  for (const entry of children) {
+    if (!entry.child.killed) {
+      entry.child.kill("SIGINT");
     }
   }
-  process.exit(0);
+
+  setTimeout(() => process.exit(0), 250);
 }
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+scheduleStartup();

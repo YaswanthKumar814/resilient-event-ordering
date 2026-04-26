@@ -4,14 +4,17 @@
   "description": "Simulation of a resilient distributed event ordering system using Lamport and vector clocks.",
   "main": "event-collector/collector.js",
   "scripts": {
-    "start:order": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'services/order-service/index.js'));\"",
-    "start:payment": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'services/payment-service/index.js'));\"",
-    "start:restaurant": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'services/restaurant-service/index.js'));\"",
-    "start:delivery": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'services/delivery-service/index.js'));\"",
-    "start:collector": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'event-collector/collector.js'));\"",
-    "start:all": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'scripts/startAll.js'));\"",
-    "dev": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'scripts/startAll.js'));\"",
-    "check": "node -e \"const fs=require('fs'); const path=require('path'); const cwd=fs.realpathSync('.'); require(path.join(cwd,'scripts/check.js'));\""
+    "start:order": "node services/order-service/index.js",
+    "start:payment": "node services/payment-service/index.js",
+    "start:restaurant": "node services/restaurant-service/index.js",
+    "start:delivery": "node services/delivery-service/index.js",
+    "start:collector": "node event-collector/collector.js",
+    "start:all": "node scripts/startAll.js",
+    "dev": "node scripts/startAll.js",
+    "check": "npm run check:static",
+    "check:static": "node scripts/check.js static",
+    "check:live": "node scripts/check.js live",
+    "test": "node scripts/check.js test"
   },
   "keywords": [
     "distributed-systems",

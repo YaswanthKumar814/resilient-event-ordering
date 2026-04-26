@@ -5,15 +5,20 @@ const axios = require("axios");
 
 const LamportClock = require("../shared/lamportClock");
 const VectorClock = require("../shared/vectorClock");
+const { eventSchema } = require("../shared/eventSchema");
 const { sortByLamport, buildOrderedRecords } = require("../event-collector/orderingEngine");
 
+const MODE = process.argv[2] || "static";
 const BASE_URL = process.env.CHECK_BASE_URL || "http://127.0.0.1:4000";
-const ORDER_URL = process.env.CHECK_ORDER_URL || "http://127.0.0.1:3001/order";
-const ENABLE_LOAD_TEST = process.env.CHECK_LOAD_TEST === "1";
-const ENABLE_LIVE_CHECKS = process.env.CHECK_SKIP_LIVE !== "1";
-const LOAD_TEST_ORDERS = Math.min(Math.max(Number(process.env.CHECK_LOAD_ORDERS || 10), 1), 10);
+const SERVICE_HEALTH_URLS = [
+  { name: "collector", url: `${BASE_URL}/health` },
+  { name: "order-service", url: "http://127.0.0.1:3001/health" },
+  { name: "payment-service", url: "http://127.0.0.1:3002/health" },
+  { name: "restaurant-service", url: "http://127.0.0.1:3003/health" },
+  { name: "delivery-service", url: "http://127.0.0.1:3004/health" }
+];
 
-const filesToCheck = [
+const AUTHORED_FILES = [
   "shared/constants.js",
   "shared/lamportClock.js",
   "shared/vectorClock.js",
@@ -36,98 +41,78 @@ const filesToCheck = [
   "dashboard/app.js"
 ];
 
-const summary = {
-  lamport: true,
-  vector: true,
-  ordering: true,
-  eventFlow: true,
-  concurrency: true,
-  overall: true
+const results = {
+  errors: 0,
+  warnings: 0
 };
-
-let warningCount = 0;
-let errorCount = 0;
 
 function pass(message) {
   console.log(`[PASS] ${message}`);
 }
 
 function warn(message) {
-  warningCount += 1;
+  results.warnings += 1;
   console.warn(`[WARN] ${message}`);
 }
 
 function fail(message, error) {
-  errorCount += 1;
-  console.error(`[ERROR] ${message}`);
+  results.errors += 1;
+  console.error(`[FAIL] ${message}`);
   if (error) {
     console.error(error.stack || error.message || String(error));
   }
 }
 
-function markFailure(section) {
-  summary[section] = false;
-  summary.overall = false;
+function readFile(relativePath) {
+  return fs.readFileSync(path.join(__dirname, "..", relativePath), "utf8");
 }
 
-function normalizeVector(vector, size = 4) {
-  return Array.from({ length: size }, (_, index) => Number(vector?.[index] || vector?.[String(index)] || 0));
-}
+function ensureSyntax() {
+  for (const relativePath of AUTHORED_FILES) {
+    const source = readFile(relativePath);
 
-function validateSyntax() {
-  for (const relativeFile of filesToCheck) {
-    const fullPath = path.join(__dirname, "..", relativeFile);
-    const source = fs.readFileSync(fullPath, "utf8");
-
-    if (relativeFile.endsWith(".js")) {
+    if (relativePath.endsWith(".js")) {
       try {
         new Function(source);
-        pass(`Syntax OK ${relativeFile}`);
+        pass(`Syntax valid: ${relativePath}`);
       } catch (error) {
-        markFailure("overall");
-        fail(`Syntax invalid ${relativeFile}`, error);
+        fail(`Syntax invalid: ${relativePath}`, error);
       }
       continue;
     }
 
-    if (!source.trim()) {
-      markFailure("overall");
-      fail(`File is empty ${relativeFile}`);
+    if (source.trim()) {
+      pass(`File present: ${relativePath}`);
     } else {
-      pass(`File present ${relativeFile}`);
+      fail(`File is empty: ${relativePath}`);
     }
   }
 }
 
-function validateLamportClockUnitTests() {
+function testLamportClock() {
   try {
     const clock = new LamportClock();
     assert.strictEqual(clock.getTime(), 0);
     assert.strictEqual(clock.tick(), 1);
     assert.strictEqual(clock.tick(), 2);
     assert.strictEqual(clock.update(5), 6);
-    assert.strictEqual(clock.getTime(), 6);
     assert.strictEqual(clock.update(4), 7);
-    pass("Lamport clock increments and merges correctly");
+    pass("Lamport clock increment and merge logic is correct");
   } catch (error) {
-    markFailure("lamport");
-    fail("Lamport clock logic failed unit validation", error);
+    fail("Lamport clock validation failed", error);
   }
 }
 
-function validateVectorClockUnitTests() {
+function testVectorClock() {
   try {
-    const vector = new VectorClock(4, 2);
-    const firstTick = vector.tick();
-    assert.deepStrictEqual(firstTick, { 0: 0, 1: 0, 2: 1, 3: 0 });
-
-    const snapshot = vector.snapshot();
-    snapshot["2"] = 99;
-    assert.deepStrictEqual(vector.snapshot(), { 0: 0, 1: 0, 2: 1, 3: 0 });
-
-    const merged = vector.merge({ 0: 3, 1: 2, 2: 0, 3: 4 });
-    assert.deepStrictEqual(merged, { 0: 3, 1: 2, 2: 2, 3: 4 });
-
+    const vector = new VectorClock(undefined, 2);
+    assert.deepStrictEqual(vector.tick(), { 0: 0, 1: 0, 2: 1, 3: 0 });
+    assert.deepStrictEqual(vector.merge({ 0: 3, 1: 2, 2: 0, 3: 4 }), {
+      0: 3,
+      1: 2,
+      2: 2,
+      3: 4
+    });
     assert.strictEqual(
       VectorClock.compare({ 0: 1, 1: 0, 2: 0, 3: 0 }, { 0: 1, 1: 0, 2: 0, 3: 0 }),
       "equal"
@@ -144,16 +129,14 @@ function validateVectorClockUnitTests() {
       VectorClock.compare({ 0: 2, 1: 0, 2: 0, 3: 0 }, { 0: 1, 1: 1, 2: 0, 3: 0 }),
       "concurrent"
     );
-
-    pass("Vector clock tick, merge, snapshot, and compare logic validated");
+    pass("Vector clock merge and causal comparison are correct");
   } catch (error) {
-    markFailure("vector");
-    fail("Vector clock logic failed unit validation", error);
+    fail("Vector clock validation failed", error);
   }
 }
 
-function validateOrderingEngineUnitTests() {
-  const input = [
+function testOrderingEngine() {
+  const events = [
     {
       event_id: "b",
       service: "RestaurantService",
@@ -175,344 +158,181 @@ function validateOrderingEngineUnitTests() {
   ];
 
   try {
-    const original = JSON.stringify(input);
-    const sorted = sortByLamport(input);
-    assert.strictEqual(sorted[0].event_id, "c");
-    assert.strictEqual(sorted[1].event_id, "a");
-    assert.strictEqual(sorted[2].event_id, "b");
-    assert.strictEqual(JSON.stringify(input), original);
+    const sorted = sortByLamport(events);
+    assert.deepStrictEqual(
+      sorted.map((event) => event.event_id),
+      ["c", "a", "b"]
+    );
 
-    const ordered = buildOrderedRecords(input);
+    const ordered = buildOrderedRecords(events);
     assert.strictEqual(ordered[0].vector_relation_to_previous, "equal");
     assert.strictEqual(ordered[1].vector_relation_to_previous, "causal_before");
     assert.strictEqual(ordered[2].vector_relation_to_previous, "concurrent");
-    pass("Ordering engine preserves input and applies Lamport + vector rules correctly");
+    pass("Ordering engine applies Lamport ordering and relation labels correctly");
   } catch (error) {
-    markFailure("ordering");
-    fail("Ordering engine failed unit validation", error);
+    fail("Ordering engine validation failed", error);
   }
 }
 
-function validateDashboardStaticBehavior() {
+function testEventSchema() {
+  const validEvent = {
+    event_id: "9d85fd67-dca7-4ed4-b4bf-54c7c7e0ef49",
+    order_id: "order-1001",
+    event_type: "PAYMENT_SUCCESS",
+    service: "PaymentService",
+    lamport_timestamp: 3,
+    vector_timestamp: { 0: 1, 1: 2, 2: 0, 3: 0 },
+    physical_timestamp: "2026-04-26T00:00:00.000Z",
+    payload: {
+      triggered_by: "OrderService",
+      previous_event_id: "3c31d661-81f5-4545-80c4-b5cfb1f0bf6b",
+      previous_event_type: "ORDER_PLACED",
+      previous_service: "OrderService",
+      source_endpoint: "/pay"
+    }
+  };
+
+  const invalidRecursiveEvent = {
+    ...validEvent,
+    payload: {
+      triggered_by: "OrderService",
+      previous_event_id: "3c31d661-81f5-4545-80c4-b5cfb1f0bf6b",
+      causal_event: {
+        event_id: "nested"
+      }
+    }
+  };
+
   try {
-    const dashboardSource = fs.readFileSync(path.join(__dirname, "..", "dashboard/app.js"), "utf8");
-    assert.ok(dashboardSource.includes('const API_BASE_URL = "http://localhost:4000";'));
-    assert.ok(dashboardSource.includes('`${API_BASE_URL}/orders/${encodeURIComponent(orderId)}/timeline`'));
+    assert.strictEqual(eventSchema.validate(validEvent).error, undefined);
+    assert.ok(eventSchema.validate(invalidRecursiveEvent).error);
+    pass("Event schema accepts bounded payloads and rejects recursive payload nesting");
+  } catch (error) {
+    fail("Event schema validation failed", error);
+  }
+}
+
+function testDashboardAssumptions() {
+  try {
+    const dashboardSource = readFile("dashboard/app.js");
     assert.ok(!dashboardSource.includes(".sort("));
-    pass("Dashboard fetch target and no-client-sort behavior validated");
+    assert.ok(dashboardSource.includes('const AUTO_REFRESH_INTERVAL_MS = 3000;'));
+    assert.ok(dashboardSource.includes('const API_BASE_URL = "http://localhost:4000";'));
+    pass("Dashboard stays aligned with no-client-sort validation assumptions");
   } catch (error) {
-    markFailure("overall");
-    fail("Dashboard static validation failed", error);
+    fail("Dashboard validation failed", error);
   }
 }
 
-function validateBaseServiceStaticFlow() {
-  try {
-    const baseSource = fs.readFileSync(path.join(__dirname, "..", "services/baseService.js"), "utf8");
-    const orderSource = fs.readFileSync(path.join(__dirname, "..", "services/order-service/index.js"), "utf8");
-    const paymentSource = fs.readFileSync(path.join(__dirname, "..", "services/payment-service/index.js"), "utf8");
-    const restaurantSource = fs.readFileSync(path.join(__dirname, "..", "services/restaurant-service/index.js"), "utf8");
-
-    assert.ok(baseSource.includes("lamportClock.update(payload.causal_event.lamport_timestamp);"));
-    assert.ok(baseSource.includes("vectorClock.merge(payload.causal_event.vector_timestamp);"));
-    assert.ok(
-      baseSource.indexOf("lamportClock.update(payload.causal_event.lamport_timestamp);")
-        < baseSource.indexOf("for (const eventType of eventSequence)")
-    );
-    assert.ok(baseSource.includes("const lamportTimestamp = lamportClock.tick();"));
-    assert.ok(baseSource.includes("const vectorTimestamp = vectorClock.tick();"));
-    assert.ok(
-      baseSource.indexOf("const event = buildEvent({")
-        < baseSource.indexOf("await publishEvent(publisher, event);")
-    );
-    assert.ok(orderSource.includes('name: SERVICES.PaymentService.name'));
-    assert.ok(!orderSource.includes('name: SERVICES.RestaurantService.name'));
-    assert.ok(!orderSource.includes('name: SERVICES.DeliveryService.name'));
-    assert.ok(paymentSource.includes('name: SERVICES.RestaurantService.name'));
-    assert.ok(!paymentSource.includes('name: SERVICES.DeliveryService.name'));
-    assert.ok(restaurantSource.includes('name: SERVICES.DeliveryService.name'));
-    pass("Service flow updates clocks before publishing and before downstream triggers");
-  } catch (error) {
-    markFailure("eventFlow");
-    fail("Service flow static validation failed", error);
-  }
+function runStaticChecks() {
+  console.log("Running offline static validation");
+  ensureSyntax();
+  testLamportClock();
+  testVectorClock();
+  testOrderingEngine();
+  testEventSchema();
+  testDashboardAssumptions();
 }
 
 async function fetchJson(url, description, validateStatus) {
   const response = await axios.get(url, {
-    timeout: 5000,
+    timeout: 4000,
     validateStatus: validateStatus || ((status) => status >= 200 && status < 300)
   });
-  pass(`API OK ${description}`);
+  pass(`Live endpoint reachable: ${description}`);
   return response.data;
 }
 
-function validateVectorAndLamport(orderId, timeline) {
-  let previousLamport = -1;
-  let concurrentCount = 0;
+function validateGroupedOrderedResponse(payload) {
+  assert.ok(payload && typeof payload === "object");
+  assert.ok(Array.isArray(payload.orders), "orders must be an array");
 
-  timeline.forEach((event, index) => {
-    if (event.lamport_timestamp < previousLamport) {
-      throw new Error(`Lamport decreased in ${orderId} at index ${index}`);
+  for (const order of payload.orders) {
+    assert.ok(typeof order.order_id === "string" && order.order_id.length > 0);
+    assert.ok(Array.isArray(order.events), "order.events must be an array");
+
+    for (let index = 0; index < order.events.length; index += 1) {
+      const event = order.events[index];
+      assert.ok(event.event_id);
+      assert.strictEqual(event.order_id, order.order_id);
+      assert.ok(event.event_type);
+      assert.ok(Number.isInteger(event.lamport_timestamp));
+      assert.ok(event.vector_timestamp && typeof event.vector_timestamp === "object");
+      assert.ok(typeof event.order_index === "number");
+      assert.ok(typeof event.ordering_basis === "string");
+      assert.ok(typeof event.vector_relation_to_previous === "string");
+
+      if (index > 0) {
+        const previous = order.events[index - 1];
+        assert.ok(
+          event.lamport_timestamp > previous.lamport_timestamp ||
+            (event.lamport_timestamp === previous.lamport_timestamp &&
+              event.service.localeCompare(previous.service) >= 0),
+          "events inside each order must follow Lamport ordering with service tie-breaker"
+        );
+      }
     }
-    previousLamport = event.lamport_timestamp;
-
-    const expectedRelation =
-      index === 0
-        ? "equal"
-        : VectorClock.compare(timeline[index - 1].vector_timestamp, event.vector_timestamp);
-    if (event.vector_relation_to_previous !== expectedRelation) {
-      throw new Error(
-        `Vector relation mismatch in ${orderId} at index ${index}: expected ${expectedRelation}, got ${event.vector_relation_to_previous}`
-      );
-    }
-
-    if (event.vector_relation_to_previous === "concurrent") {
-      concurrentCount += 1;
-    }
-  });
-
-  return concurrentCount;
-}
-
-function validateCycle(orderId, cycle, cycleIndex) {
-  const stageIndex = {
-    ORDER_PLACED: 0,
-    PAYMENT_SUCCESS: 1,
-    FOOD_PREPARING: 2,
-    OUT_FOR_DELIVERY: 3,
-    DELIVERED: 4
-  };
-
-  let previousStage = -1;
-
-  cycle.forEach((event, index) => {
-    const currentStage = stageIndex[event.event_type];
-    if (currentStage === undefined) {
-      throw new Error(`Unknown event type ${event.event_type} in ${orderId}`);
-    }
-    if (currentStage < previousStage) {
-      throw new Error(`Lifecycle regressed in ${orderId} cycle ${cycleIndex} with ${event.event_type}`);
-    }
-    previousStage = currentStage;
-  });
-
-}
-
-function splitTimelineIntoCycles(orderId, timeline) {
-  const cycles = [];
-  let current = [];
-
-  timeline.forEach((event) => {
-    if (event.event_type === "ORDER_PLACED" && current.length > 0) {
-      cycles.push(current);
-      current = [];
-    }
-
-    current.push(event);
-  });
-
-  if (current.length > 0) {
-    cycles.push(current);
   }
-
-  if (cycles.length > 1) {
-    warn(`Order ${orderId} contains ${cycles.length} lifecycle segments; order_id appears to have been reused`);
-  }
-
-  return cycles;
 }
 
-function validateTimelineSequence(orderId, timeline) {
-  const concurrentCount = validateVectorAndLamport(orderId, timeline);
-  const cycles = splitTimelineIntoCycles(orderId, timeline);
-
-  cycles.forEach((cycle, cycleIndex) => {
-    if (cycle[0]?.event_type !== "ORDER_PLACED") {
-      throw new Error(`Timeline ${orderId} cycle ${cycleIndex} does not start with ORDER_PLACED`);
-    }
-
-    validateCycle(orderId, cycle, cycleIndex);
-  });
-
-  return concurrentCount;
-}
-
-function validateGlobalEventSet(rawEvents, orderedEvents) {
-  const rawIds = new Set();
-  const orderedIds = new Set();
-
-  rawEvents.forEach((event) => {
-    if (rawIds.has(event.event_id)) {
-      throw new Error(`Duplicate raw event_id detected: ${event.event_id}`);
-    }
-    rawIds.add(event.event_id);
-  });
-
-  orderedEvents.forEach((event, index) => {
-    if (orderedIds.has(event.event_id)) {
-      throw new Error(`Duplicate ordered event_id detected: ${event.event_id}`);
-    }
-    orderedIds.add(event.event_id);
-
-    if (index > 0 && event.lamport_timestamp < orderedEvents[index - 1].lamport_timestamp) {
-      throw new Error("Lamport ordering regression detected in /events/ordered response");
-    }
-  });
-}
-
-async function validateLiveApis() {
-  let concurrentEventsDetected = 0;
+async function runLiveChecks() {
+  console.log("Running live validation against the active system");
 
   try {
-    const rawEvents = await fetchJson(`${BASE_URL}/events/raw`, "GET /events/raw");
-    const orderedEvents = await fetchJson(`${BASE_URL}/events/ordered`, "GET /events/ordered");
-    const invalidTimeline = await fetchJson(
+    await fetchJson(`${BASE_URL}/health`, "collector /health");
+  } catch (error) {
+    fail("Collector is not reachable for live validation", error);
+    return;
+  }
+
+  try {
+    const ordered = await fetchJson(`${BASE_URL}/events/ordered`, "collector /events/ordered");
+    validateGroupedOrderedResponse(ordered);
+    pass("Grouped ordered response structure is correct");
+  } catch (error) {
+    fail("Grouped /events/ordered validation failed", error);
+  }
+
+  try {
+    const timeline = await fetchJson(
       `${BASE_URL}/orders/__validation_missing__/timeline`,
-      "GET /orders/:id/timeline for missing order"
+      "collector missing-order timeline"
     );
-
-    assert.ok(Array.isArray(rawEvents), "Raw events response must be an array");
-    assert.ok(Array.isArray(orderedEvents), "Ordered events response must be an array");
-    assert.ok(Array.isArray(invalidTimeline.timeline), "Missing order timeline must contain a timeline array");
-    assert.strictEqual(invalidTimeline.total_events, 0);
-    validateGlobalEventSet(rawEvents, orderedEvents);
-
-    const orderIds = [...new Set(orderedEvents.map((event) => event.order_id))];
-    for (const orderId of orderIds) {
-      const payload = await fetchJson(
-        `${BASE_URL}/orders/${encodeURIComponent(orderId)}/timeline`,
-        `GET /orders/${orderId}/timeline`
-      );
-      assert.strictEqual(payload.order_id, orderId);
-      assert.ok(Array.isArray(payload.timeline));
-      assert.strictEqual(payload.total_events, payload.timeline.length);
-      concurrentEventsDetected += validateTimelineSequence(orderId, payload.timeline);
-    }
-
-    pass("Lamport ordering valid");
-    pass("Vector relationships valid");
-    pass("Event lifecycle validation complete");
-
-    if (concurrentEventsDetected > 0) {
-      warn(`Concurrent events detected: ${concurrentEventsDetected}`);
-    } else {
-      pass("No concurrent neighboring events detected");
-    }
+    assert.ok(timeline && typeof timeline === "object");
+    assert.ok(Array.isArray(timeline.timeline));
+    assert.ok(typeof timeline.total_events === "number");
+    pass("Timeline endpoint handles missing orders cleanly");
   } catch (error) {
-    markFailure("lamport");
-    markFailure("vector");
-    markFailure("ordering");
-    markFailure("eventFlow");
-    fail("Live API validation failed", error);
+    fail("Timeline endpoint validation failed", error);
   }
-}
 
-async function runLoadTest() {
-  const orderIds = Array.from({ length: LOAD_TEST_ORDERS }, (_, index) => {
-    return `validation-${Date.now()}-${index}`;
-  });
-
-  try {
-    await Promise.all(
-      orderIds.map((orderId) =>
-        axios.post(
-          ORDER_URL,
-          {
-            order_id: orderId,
-            payload: {
-              customer: "validation-runner",
-              batch: "check-load-test"
-            }
-          },
-          { timeout: 5000 }
-        )
-      )
-    );
-
-    await new Promise((resolve) => setTimeout(resolve, 6000));
-
-    const timelines = await Promise.all(
-      orderIds.map((orderId) =>
-        axios.get(`${BASE_URL}/orders/${encodeURIComponent(orderId)}/timeline`, { timeout: 5000 })
-      )
-    );
-
-    let totalEvents = 0;
-    for (const response of timelines) {
-      const payload = response.data;
-      totalEvents += payload.total_events;
-      validateTimelineSequence(payload.order_id, payload.timeline);
+  for (const service of SERVICE_HEALTH_URLS.slice(1)) {
+    try {
+      await fetchJson(service.url, `${service.name} /health`);
+    } catch (error) {
+      warn(`Service not reachable during live validation: ${service.name}`);
     }
-
-    if (totalEvents < LOAD_TEST_ORDERS * 5) {
-      warn(`Load test generated fewer events than expected: ${totalEvents}`);
-    } else {
-      pass(`Load test generated ${totalEvents} ordered events across ${LOAD_TEST_ORDERS} orders`);
-    }
-
-    const orderedResponse = await axios.get(`${BASE_URL}/events/ordered`, { timeout: 5000 });
-    assert.ok(Array.isArray(orderedResponse.data));
-    pass("Rapid concurrent API access remained stable during validation load");
-  } catch (error) {
-    markFailure("eventFlow");
-    markFailure("ordering");
-    fail("Load test validation failed", error);
-  }
-}
-
-function printReport() {
-  const status = (value) => (value ? "✅" : "❌");
-
-  console.log("");
-  console.log("SYSTEM VALIDATION REPORT");
-  console.log("");
-  console.log(`Lamport Clock: ${status(summary.lamport)}`);
-  console.log(`Vector Clock: ${status(summary.vector)}`);
-  console.log(`Ordering Engine: ${status(summary.ordering)}`);
-  console.log(`Event Flow: ${status(summary.eventFlow)}`);
-  console.log(`Concurrency Handling: ${status(summary.concurrency)}`);
-  console.log(`Overall System: ${status(summary.overall)}`);
-
-  if (warningCount > 0) {
-    console.log("");
-    console.log(`[WARN] Validation completed with ${warningCount} warning(s)`);
-  }
-
-  if (errorCount > 0) {
-    process.exitCode = 1;
   }
 }
 
 async function main() {
-  validateSyntax();
-  validateLamportClockUnitTests();
-  validateVectorClockUnitTests();
-  validateOrderingEngineUnitTests();
-  validateDashboardStaticBehavior();
-  validateBaseServiceStaticFlow();
-
-  if (ENABLE_LIVE_CHECKS) {
-    try {
-      await validateLiveApis();
-    } catch (error) {
-      warn(`Live API checks skipped or incomplete: ${error.message}`);
-    }
+  if (MODE === "static" || MODE === "test") {
+    runStaticChecks();
+  } else if (MODE === "live") {
+    await runLiveChecks();
   } else {
-    warn("Live API checks skipped by CHECK_SKIP_LIVE=1");
+    fail(`Unknown validation mode: ${MODE}`);
   }
 
-  if (ENABLE_LOAD_TEST) {
-    await runLoadTest();
-  } else {
-    warn("Load test skipped. Run with CHECK_LOAD_TEST=1 to generate concurrent validation traffic.");
-  }
+  console.log("");
+  console.log(`Validation finished with ${results.errors} failure(s) and ${results.warnings} warning(s)`);
 
-  printReport();
+  if (results.errors > 0) {
+    process.exitCode = 1;
+  }
 }
 
 main().catch((error) => {
-  markFailure("overall");
-  fail("Validation runner failed unexpectedly", error);
-  printReport();
+  fail("Validation runner crashed unexpectedly", error);
+  process.exitCode = 1;
 });

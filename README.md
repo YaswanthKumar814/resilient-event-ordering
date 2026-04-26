@@ -1,43 +1,41 @@
 # Distributed Event Ordering System
 
-A Node.js academic project that demonstrates how to reconstruct logical event order in a distributed workflow even when events are generated and delivered asynchronously.
+A Node.js academic project that demonstrates how to reconstruct logical event order in a distributed workflow when events are generated and delivered asynchronously.
 
 ## Problem Statement
 
-In distributed systems, events often do not arrive in the same order in which they were logically produced. Network delay, asynchronous processing, retries, and clock skew can cause events from different services to appear out of sequence. This makes it difficult to understand what actually happened first, what events are causally related, and which events occurred concurrently.
+In distributed systems, events often do not arrive in the same order in which they were logically produced. Network delay, asynchronous processing, retries, and clock skew can cause events from different services to appear out of sequence. This makes it difficult to determine what happened first, which events are causally related, and which events are concurrent.
 
 This project addresses the problem of **reconstructing logical event order in distributed systems when events arrive out of order**. Instead of relying on physical timestamps alone, the system uses logical clock techniques to rebuild a meaningful timeline for each order workflow.
 
-The project models a food-ordering flow across multiple services:
+The project models a food-ordering flow across four services:
 
 - `OrderService`
 - `PaymentService`
 - `RestaurantService`
 - `DeliveryService`
 
-The goal is to observe how distributed events are created, transported, collected, persisted, and then logically reconstructed for analysis.
-
 ## Computing Strategy Used
 
-This project uses a combination of distributed systems concepts and practical infrastructure components:
+This project combines core distributed systems ideas with lightweight infrastructure:
 
-- **Lamport clocks** are used to assign a logical timestamp to each event so that a deterministic total order can be reconstructed.
-- **Vector clocks** are used to capture causality information and identify whether neighboring events are causally related or concurrent.
-- **Redis Pub/Sub** is used as a lightweight event transport from services to the collector.
-- **MongoDB** is used to persist both raw received events and reconstructed ordered events.
-- **A static dashboard** is used to visualize per-order timelines and inspect the reconstructed event stream.
+- **Lamport clocks** provide deterministic logical ordering.
+- **Vector clocks** capture causality and detect concurrency.
+- **Redis Pub/Sub** transports emitted events to the collector.
+- **MongoDB** stores both raw events and reconstructed ordered events.
+- **A static dashboard** visualizes grouped per-order timelines for demonstration and viva.
 
-### Why this strategy is appropriate
+### Why this strategy fits the project
 
-- Lamport clocks are simple and effective for building a total logical ordering across distributed events.
-- Vector clocks complement Lamport clocks by capturing causality, which Lamport clocks alone cannot fully express.
-- Redis Pub/Sub keeps the prototype lightweight and easy to run for academic demonstration.
-- MongoDB allows flexible storage of event payloads and clock metadata.
-- The dashboard makes abstract distributed systems concepts easier to explain during evaluation and viva.
+- Lamport clocks are simple and effective for reconstructing total order within the chosen workflow context.
+- Vector clocks provide additional causality information that Lamport clocks alone cannot express.
+- Redis Pub/Sub keeps the prototype lightweight and easy to run in a classroom or lab environment.
+- MongoDB is flexible for storing clock metadata and event payloads.
+- The dashboard makes abstract distributed ordering concepts easier to explain during evaluation.
 
 ## System Architecture
 
-The current implementation follows this workflow exactly:
+The current implementation follows this chained service flow exactly:
 
 ```text
 Client
@@ -72,64 +70,64 @@ Each service publishes its generated event to Redis Pub/Sub ("events")
 5. `DeliveryService` merges the received causal clock state and emits:
    - `OUT_FOR_DELIVERY`
    - `DELIVERED`
-6. The collector subscribes to Redis, stores raw events, and reconstructs the ordered per-order timeline
+6. The collector subscribes to Redis, stores raw events, and reconstructs grouped per-order logical timelines
 
-This is **not** a parallel triggering design. The current implementation is a chained flow:
+This is **not** a parallel triggering design. The current flow is:
 
 `OrderService -> PaymentService -> RestaurantService -> DeliveryService`
 
 ## Features
 
 - Four independent services running on separate ports
-- Lamport clock based logical ordering
-- Vector clock based causality and concurrency detection
+- Lamport-clock based logical ordering
+- Vector-clock based causality and concurrency detection
 - Redis Pub/Sub event transport to the collector
 - MongoDB persistence for raw and ordered event streams
 - Duplicate-event protection at the collector level
 - Validation of incoming event payloads
-- Collector APIs for raw events, ordered events, and order-specific timelines
-- Static dashboard for timeline visualization
+- Collector APIs for raw events, grouped ordered events, and order-specific timelines
+- Static dashboard for grouped per-order visualization
 - Random delay and physical clock skew for distributed-system simulation
 
 ## Detailed Survey / Related Work
 
-Distributed event ordering has been studied through several clock and messaging models:
+Distributed event ordering has been studied through multiple clock and messaging approaches:
 
 ### Lamport clocks
 
-Lamport clocks provide a scalar logical time that preserves the rule:
+Lamport clocks provide a scalar logical timestamp that preserves the rule:
 
 If event A happened before event B, then `Lamport(A) < Lamport(B)`.
 
-They are useful for constructing a **deterministic total order**, but they do not fully capture concurrency by themselves.
+They are useful for deterministic ordering, but they do not fully represent concurrency on their own.
 
 ### Vector clocks
 
-Vector clocks extend logical time by tracking one counter per process or service. They can distinguish:
+Vector clocks track one logical counter per service. They can distinguish:
 
 - one event causally before another
 - one event causally after another
 - two events being concurrent
 
-They are more expressive than Lamport clocks, but also require more metadata.
+They are more expressive than Lamport clocks, but they require more metadata.
 
 ### Kafka-style durable event systems
 
-Kafka and similar log-based systems provide durable storage, replay, partitioning, and stronger support for large-scale event processing. They are a better fit for production-grade event streaming, auditing, and recovery, but they introduce more setup and operational complexity than needed for a classroom prototype.
+Kafka and similar log-based platforms provide durable storage, replay, partitioning, and stronger support for large-scale event streaming. They are better suited to production event pipelines, but they add more setup and operational complexity than needed for this prototype.
 
 ### RabbitMQ and broker-based messaging
 
-RabbitMQ and similar brokers provide queues, routing, acknowledgements, and more reliable delivery semantics than simple pub/sub systems. They are useful when message durability and consumer coordination are important.
+RabbitMQ and similar brokers provide queues, acknowledgements, routing, and more reliable delivery semantics than simple pub/sub systems. They are useful when delivery guarantees and consumer coordination matter.
 
 ### Why Redis Pub/Sub was used here
 
 This project uses Redis Pub/Sub because it is:
 
 - simple to set up
-- easy to demonstrate in a lab environment
-- lightweight enough for a focused prototype
+- easy to demonstrate in a lab setting
+- lightweight enough for a focused academic prototype
 
-However, Redis Pub/Sub is used here mainly for **prototype simplicity**, not as a claim of production-grade durability or resilience.
+It is used here for **prototype simplicity**, not as a claim of production-grade durability.
 
 ## Event Schema
 
@@ -147,42 +145,44 @@ However, Redis Pub/Sub is used here mainly for **prototype simplicity**, not as 
     "3": 0
   },
   "physical_timestamp": "2026-03-18T00:00:00.000Z",
-  "payload": {}
+  "payload": {
+    "triggered_by": "OrderService",
+    "previous_event_id": "uuid",
+    "previous_event_type": "ORDER_PLACED",
+    "previous_service": "OrderService",
+    "source_endpoint": "/pay"
+  }
 }
 ```
+
+Newly created events use bounded payload metadata. Recursive payload nesting is intentionally avoided.
 
 ## Ordering Logic
 
 ### Lamport ordering
 
-The collector reconstructs logical order using:
+The collector reconstructs logical order within each order timeline using:
 
 1. `lamport_timestamp` ascending
 2. `service` name as a deterministic tie-breaker
 
-This gives a stable logical order for stored events.
-
 ### Vector relation analysis
 
-The collector compares each ordered event with the previous ordered event in the same timeline and labels the relationship as:
+For each per-order ordered timeline, the collector compares each event with the previous event and labels the relationship as:
 
 - `causal_before`
 - `causal_after`
 - `concurrent`
 - `equal`
 
-This helps explain whether neighboring events are causally linked or independent.
-
 ## Known Limitations
 
-This section is intentionally explicit because it reflects the current implementation honestly:
+This project is intentionally honest about its current scope:
 
-- **Redis Pub/Sub is non-durable**. If the collector is unavailable while an event is published, that event may be lost.
-- **The system is partially event-driven**. Events are published to Redis for collection, but downstream service coordination is still performed through direct HTTP calls.
-- **Ordering is primarily per-order reconstruction**. The strongest ordering story in this project is the reconstructed timeline for a specific `order_id`.
-- **This is not production-grade resilience**. The project is a prototype for academic demonstration, not a fault-tolerant deployment with durable messaging, retries with guarantees, or high-availability infrastructure.
-
-These limitations should be stated clearly during evaluation rather than hidden.
+- **Redis Pub/Sub is non-durable**. Events may be lost if the collector is unavailable during publication.
+- **The system is partially event-driven**. Downstream service progression still uses direct HTTP calls.
+- **Ordering is reconstructed per order**. The system does not claim a single global total order across unrelated customer orders.
+- **This is not production-grade resilience**. The focus is academic demonstration, not HA deployment or durable recovery guarantees.
 
 ## Setup
 
@@ -194,13 +194,25 @@ Run Redis and MongoDB:
 docker compose up -d
 ```
 
+The Compose file now includes healthchecks for both services to improve local startup reliability.
+
 ### 2. Install dependencies
 
 ```bash
 npm install
 ```
 
-### 3. Start the system
+### 3. Configure environment if needed
+
+Optional defaults are documented in:
+
+```text
+.env.example
+```
+
+You can copy those values into a local `.env` file if you want explicit configuration.
+
+### 4. Start the application
 
 Run everything together:
 
@@ -220,13 +232,29 @@ npm run start:delivery
 
 ## Environment Variables
 
-Optional configuration:
+Documented defaults:
 
 ```bash
 MONGO_URI=mongodb://127.0.0.1:27017/distributed_event_ordering
 REDIS_URL=redis://127.0.0.1:6379
 COLLECTOR_PORT=4000
+ORDER_SERVICE_PORT=3001
+PAYMENT_SERVICE_PORT=3002
+RESTAURANT_SERVICE_PORT=3003
+DELIVERY_SERVICE_PORT=3004
 ```
+
+Current implementation notes:
+
+- Redis default: `127.0.0.1:6379`
+- MongoDB default: `127.0.0.1:27017`
+- Collector default: `127.0.0.1:4000`
+- Service ports are currently fixed in [`shared/constants.js`](./shared/constants.js):
+  - `OrderService`: `3001`
+  - `PaymentService`: `3002`
+  - `RestaurantService`: `3003`
+  - `DeliveryService`: `3004`
+- Dashboard fallback collector base when opened directly: `http://localhost:4000`
 
 ## API Usage
 
@@ -240,7 +268,7 @@ curl -X POST http://127.0.0.1:3001/order \
 
 ### Trigger services individually
 
-These endpoints are available, but the normal intended workflow is to start from `OrderService`:
+These endpoints remain available, but the intended workflow is to start from `OrderService`:
 
 ```bash
 curl -X POST http://127.0.0.1:3002/pay -H "Content-Type: application/json" -d "{\"order_id\":\"order-1001\"}"
@@ -256,6 +284,23 @@ curl http://127.0.0.1:4000/events/ordered
 curl http://127.0.0.1:4000/orders/order-1001/timeline
 ```
 
+### Current meaning of `/events/ordered`
+
+`/events/ordered` returns grouped per-order ordered timelines, not a global cross-order sequence:
+
+```json
+{
+  "orders": [
+    {
+      "order_id": "order-1001",
+      "events": []
+    }
+  ]
+}
+```
+
+Each `events` array is logically reconstructed for that `order_id` only.
+
 ## Dashboard
 
 Open the dashboard directly in a browser:
@@ -264,25 +309,29 @@ Open the dashboard directly in a browser:
 dashboard/index.html
 ```
 
-The dashboard fetches:
+The dashboard now:
 
-```text
-http://localhost:4000/orders/:id/timeline
-```
+- uses the collector API base shown in the UI
+- falls back to `http://localhost:4000` when opened from `file://`
+- auto-detects the browser host with port `4000` when served over HTTP
 
 It shows:
 
-- total event count
-- ordered event cards
-- service labels
+- total events collected
+- total orders tracked
+- latest processed event
+- latest active order
+- reconstruction status
+- grouped per-order reconstructed timelines
+- service flow and ordering explanation blocks
 - Lamport timestamps
 - vector timestamps
-- vector relation to previous event
+- vector relationship labels
 - raw JSON for inspection
 
 ## Live Demo Flow
 
-For evaluation, the easiest demonstration sequence is:
+For faculty evaluation, the easiest demonstration flow is:
 
 1. Start Redis and MongoDB
 2. Start the collector and all services
@@ -293,15 +342,15 @@ For evaluation, the easiest demonstration sequence is:
    - `FOOD_PREPARING`
    - `OUT_FOR_DELIVERY`
    - `DELIVERED`
-5. Observe that events are published asynchronously and may not be trusted by physical timestamp alone
-6. Use the collector timeline API to inspect the reconstructed logical order
-7. Open the dashboard and visualize the final ordered timeline for the chosen `order_id`
+5. Observe that physical timestamps alone are not enough to explain logical sequence
+6. Query the collector to view grouped ordered data and the order-specific timeline
+7. Open the dashboard and show the reconstructed per-order logical workflow
 
 During demo, evaluators should focus on:
 
 - how logical clocks are propagated
 - why physical time is not sufficient
-- how the collector reconstructs order from distributed events
+- how the collector reconstructs order per `order_id`
 - how causality and concurrency are interpreted
 
 ## Project Structure
@@ -340,6 +389,7 @@ distributed-event-ordering/
 │   ├── lamportClock.js
 │   ├── logger.js
 │   └── vectorClock.js
+├── .env.example
 ├── docker-compose.yml
 ├── package.json
 └── README.md
@@ -347,40 +397,50 @@ distributed-event-ordering/
 
 ## Verification
 
-Run the project validation script:
+Run offline static validation:
 
 ```bash
-npm run check
+npm run check:static
 ```
 
-Note: the current validation script includes more than syntax checks. Depending on configuration, it may also attempt live API validation.
+Run live validation when Redis, MongoDB, the collector, and the services are already running:
+
+```bash
+npm run check:live
+```
+
+Run deterministic offline tests:
+
+```bash
+npm test
+```
 
 ## Possible Viva Questions
 
 1. **Why are physical timestamps not sufficient in distributed systems?**  
-   Because clock skew and network delay can make later-arriving events look earlier in wall-clock time even when they are not logically earlier.
+   Because clock skew and network delay can make later-arriving events appear earlier in wall-clock time even when they are not logically earlier.
 
 2. **Why use both Lamport clocks and vector clocks?**  
-   Lamport clocks provide deterministic total ordering, while vector clocks help detect causality and concurrency.
+   Lamport clocks provide deterministic logical ordering, while vector clocks help detect causality and concurrency.
 
-3. **Why does this project use Redis Pub/Sub instead of Kafka or RabbitMQ?**  
-   Redis Pub/Sub was chosen for prototype simplicity and ease of setup, while Kafka and RabbitMQ provide stronger durability and broker features better suited to production systems.
+3. **Why use Redis Pub/Sub instead of Kafka or RabbitMQ?**  
+   Redis Pub/Sub was chosen for simplicity and ease of demonstration, while Kafka and RabbitMQ provide stronger durability and broker features suited to production systems.
 
 4. **Is this system fully event-driven?**  
-   No. Event publication to the collector is event-driven, but downstream service progression is still coordinated by HTTP calls.
+   No. Event publication to the collector is event-driven, but downstream service progression is still coordinated through HTTP.
 
-5. **What are the main limitations of this design?**  
-   Non-durable pub/sub, partial event-driven behavior, per-order reconstruction focus, and lack of production-grade fault tolerance.
+5. **Why is ordering presented per order instead of globally?**  
+   Because the current reconstruction logic is designed to explain each workflow honestly rather than over-claiming a global cross-order total order.
 
 ## Conclusion
 
-This project is best understood as an educational prototype for demonstrating distributed event ordering using logical clocks. Its strength lies in showing how Lamport clocks and vector clocks can help reconstruct meaningful order when event arrival is asynchronous and unreliable from a physical-time perspective.
+This project is best understood as an educational prototype for demonstrating distributed event ordering using logical clocks. Its strength lies in showing how Lamport clocks and vector clocks help reconstruct meaningful workflow order when event arrival is asynchronous and physical time is unreliable.
 
-For academic evaluation, the strongest presentation strategy is to:
+For final academic evaluation, the strongest presentation strategy is to:
 
 - explain the distributed ordering problem clearly
 - demonstrate the current chained service flow honestly
 - highlight how logical clocks solve ordering and causality challenges
-- acknowledge the system limitations openly
+- acknowledge the implementation limitations openly
 
-That combination makes the project more defensible, technically credible, and viva-ready.
+That makes the project easier to run, easier to explain, and more defensible during viva.

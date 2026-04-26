@@ -9,47 +9,80 @@
   <body>
     <div class="page-shell">
       <header class="hero">
-        <div>
-          <p class="eyebrow">Collector Timeline Viewer</p>
+        <div class="hero-copy">
           <h1>Distributed Event Ordering Dashboard</h1>
           <p class="subtitle">
-            Visualize ordered events exactly as returned by the collector timeline API.
+            This dashboard explains how the system reconstructs logical ordering for each
+            order workflow using Lamport clocks and vector clocks.
           </p>
-        </div>
-        <div class="summary-card">
-          <span class="summary-label">Total Events</span>
-          <strong id="total-count">0</strong>
         </div>
       </header>
 
+      <section class="summary-grid" aria-label="Top summary">
+        <article class="summary-card panel">
+          <span class="summary-label">Total Events Collected</span>
+          <strong id="summary-total-events">0</strong>
+        </article>
+        <article class="summary-card panel">
+          <span class="summary-label">Total Orders Tracked</span>
+          <strong id="summary-total-orders">0</strong>
+        </article>
+        <article class="summary-card panel">
+          <span class="summary-label">Latest Processed Event</span>
+          <strong id="summary-latest-event">No events yet</strong>
+          <span id="summary-latest-event-meta" class="summary-meta"></span>
+        </article>
+        <article class="summary-card panel">
+          <span class="summary-label">Latest Active Order</span>
+          <strong id="summary-latest-order">No active order</strong>
+          <span id="summary-latest-order-meta" class="summary-meta"></span>
+        </article>
+        <article class="summary-card panel status-card">
+          <span class="summary-label">Reconstruction Status</span>
+          <strong id="summary-status">Pending</strong>
+          <span id="summary-status-meta" class="summary-meta"></span>
+        </article>
+      </section>
+
       <main class="layout">
         <section class="panel controls-panel">
-          <div class="controls">
-            <label for="order-id">Order ID</label>
-            <div class="controls-row">
+          <div class="controls-grid">
+            <label class="control-field" for="api-base">
+              <span>Collector API Base</span>
+              <input
+                id="api-base"
+                name="api-base"
+                type="text"
+                placeholder="http://localhost:4000"
+                autocomplete="off"
+              />
+            </label>
+            <label class="control-field" for="order-id">
+              <span>Focus Order ID</span>
               <input
                 id="order-id"
                 name="order-id"
                 type="text"
-                placeholder="Enter order id"
+                placeholder="Leave empty to view all orders"
                 autocomplete="off"
               />
-              <button id="load-button" type="button">Load Timeline</button>
-              <button id="refresh-button" type="button" class="secondary">
-                Start Auto Refresh
-              </button>
-            </div>
+            </label>
           </div>
-
+          <div class="controls-row">
+            <button id="load-button" type="button">Refresh Dashboard</button>
+            <button id="refresh-button" type="button" class="secondary">Start Auto Refresh</button>
+            <button id="toggle-json-button" type="button" class="secondary">Show JSON</button>
+          </div>
           <div class="status-row">
-            <span id="status-message" class="status-message">Ready</span>
+            <span id="status-message" class="status-message">Ready to load collector data</span>
             <span id="last-updated" class="last-updated"></span>
           </div>
         </section>
 
         <section class="panel timeline-panel">
           <div class="section-header">
-            <h2>Timeline</h2>
+            <h2>Reconstructed Per-Order Timelines</h2>
+            <span class="section-note">Grouped by <code>order_id</code> from <code>/events/ordered</code></span>
           </div>
           <div id="timeline" class="timeline" aria-live="polite"></div>
         </section>
@@ -57,13 +90,63 @@
         <section class="panel raw-panel">
           <div class="section-header">
             <h2>Raw JSON</h2>
-            <button id="toggle-json-button" type="button" class="secondary">
-              Show JSON
-            </button>
+            <span class="section-note">Current dashboard payload</span>
           </div>
           <pre id="raw-json" class="raw-json hidden"></pre>
         </section>
       </main>
+
+      <section class="panel explainer-panel">
+        <button
+          id="explainer-toggle"
+          class="explainer-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="explainer-content"
+        >
+          <span>How To Read This Demo</span>
+          <span id="explainer-icon" class="explainer-icon">+</span>
+        </button>
+        <div id="explainer-content" class="explainer-content hidden">
+          <div class="explanation-grid">
+            <article class="explanation-card">
+              <h3>Lamport Clock</h3>
+              <p>
+                A Lamport timestamp gives each event a logical time so the collector can rebuild
+                a deterministic order even when physical arrival is delayed.
+              </p>
+            </article>
+            <article class="explanation-card">
+              <h3>Vector Clock</h3>
+              <p>
+                A vector clock tracks distributed causality. It helps decide whether one event
+                happened before another or whether events are concurrent.
+              </p>
+            </article>
+            <article class="explanation-card">
+              <h3><code>causal_before</code></h3>
+              <p>
+                The previous event logically happened before the current event. This usually
+                indicates a direct workflow dependency.
+              </p>
+            </article>
+            <article class="explanation-card">
+              <h3><code>concurrent</code></h3>
+              <p>
+                Neither event logically dominates the other. They are independent in the vector
+                clock sense, even if one arrives later.
+              </p>
+            </article>
+            <article class="explanation-card">
+              <h3>Per-Order Reconstruction</h3>
+              <p>
+                The system reconstructs ordering separately for each <code>order_id</code>. It
+                does not claim a single global order across unrelated customer orders.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
     </div>
 
     <script src="./app.js"></script>
