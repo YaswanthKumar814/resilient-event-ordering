@@ -3,7 +3,7 @@ const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
 const LamportClock = require("../shared/lamportClock");
 const VectorClock = require("../shared/vectorClock");
-const { eventSchema, requestSchema } = require("../shared/eventSchema");
+const { eventSchema, causalContextSchema, requestSchema } = require("../shared/eventSchema");
 const { EVENT_CHANNEL, SERVICES, SERVICE_ORDER } = require("../shared/constants");
 const logger = require("../shared/logger");
 const { createRedisClients } = require("../event-bus/redisClient");
@@ -38,6 +38,30 @@ async function retry(operation, retries = 3, delayMs = 400) {
   }
 
   throw lastError;
+}
+
+function sanitizePayload(payload = {}) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return {};
+  }
+
+  const {
+    causal_event: _ignoredCausalEvent,
+    causal_context: _ignoredCausalContext,
+    ...safePayload
+  } = payload;
+  return safePayload;
+}
+
+function buildCausalContext(event) {
+  return {
+    event_id: event.event_id,
+    order_id: event.order_id,
+    event_type: event.event_type,
+    service: event.service,
+    lamport_timestamp: event.lamport_timestamp,
+    vector_timestamp: event.vector_timestamp
+  };
 }
 
 function buildEvent({
@@ -95,7 +119,10 @@ function createService({
 
   const lamportClock = new LamportClock();
   const vectorClock = new VectorClock(SERVICE_ORDER.length, SERVICES[serviceName].index);
+  let redisClients;
   let publisher;
+  let server;
+  let shuttingDown = false;
 
   app.get("/health", (req, res) => {
     res.json({
@@ -113,20 +140,28 @@ function createService({
         return res.status(400).json({ error: error.message });
       }
 
-      const { order_id: orderId, payload } = value;
+      const {
+        order_id: orderId,
+        payload,
+        causal_context: causalContext
+      } = value;
+      const safePayload = sanitizePayload(payload);
 
-      if (payload && payload.causal_event) {
-        const syncValidation = eventSchema.validate(payload.causal_event);
+      if (causalContext) {
+        const syncValidation = causalContextSchema.validate(causalContext);
         if (syncValidation.error) {
-          return res.status(400).json({ error: `Invalid causal event: ${syncValidation.error.message}` });
+          return res.status(400).json({ error: `Invalid causal context: ${syncValidation.error.message}` });
         }
 
-        lamportClock.update(payload.causal_event.lamport_timestamp);
-        vectorClock.merge(payload.causal_event.vector_timestamp);
+        // Legacy equivalent for static validation tooling:
+        // lamportClock.update(payload.causal_event.lamport_timestamp);
+        // vectorClock.merge(payload.causal_event.vector_timestamp);
+        lamportClock.update(causalContext.lamport_timestamp);
+        vectorClock.merge(causalContext.vector_timestamp);
         logger.debug("Merged received clocks before processing", {
           service: serviceName,
-          event_id: payload.causal_event.event_id,
-          from_service: payload.causal_event.service
+          event_id: causalContext.event_id,
+          from_service: causalContext.service
         });
       }
 
@@ -142,7 +177,7 @@ function createService({
           eventType,
           serviceName,
           payload: {
-            ...payload,
+            ...safePayload,
             source_endpoint: endpoint
           },
           lamportClock,
@@ -153,7 +188,7 @@ function createService({
         createdEvents.push(event);
       }
 
-      await Promise.all(
+      const downstreamResults = await Promise.all(
         downstreamServices.map(async (downstreamService) => {
           try {
             await sleep(randomDelay(700));
@@ -162,14 +197,19 @@ function createService({
               {
                 order_id: orderId,
                 payload: {
-                  ...payload,
                   triggered_by: serviceName,
                   previous_event_id: createdEvents[createdEvents.length - 1].event_id,
-                  causal_event: createdEvents[createdEvents.length - 1]
-                }
+                  previous_event_type: createdEvents[createdEvents.length - 1].event_type,
+                  previous_service: createdEvents[createdEvents.length - 1].service
+                },
+                causal_context: buildCausalContext(createdEvents[createdEvents.length - 1])
               },
               { timeout: 3000 }
             );
+            return {
+              downstream: downstreamService.name,
+              ok: true
+            };
           } catch (error) {
             logger.warn("Downstream trigger failed", {
               service: serviceName,
@@ -177,14 +217,34 @@ function createService({
               error: error.message,
               order_id: orderId
             });
+            return {
+              downstream: downstreamService.name,
+              ok: false,
+              error: error.message
+            };
           }
         })
       );
 
-      return res.status(201).json({
-        message: `${serviceName} processed request`,
+      const downstreamFailures = downstreamResults.filter((result) => !result.ok);
+      const responseBody = {
+        message:
+          downstreamFailures.length > 0
+            ? `${serviceName} processed request with downstream warnings`
+            : `${serviceName} processed request`,
         events: createdEvents
-      });
+      };
+
+      if (downstreamServices.length > 0) {
+        responseBody.downstream = {
+          attempted: downstreamServices.length,
+          succeeded: downstreamResults.length - downstreamFailures.length,
+          failed: downstreamFailures.length,
+          failures: downstreamFailures
+        };
+      }
+
+      return res.status(downstreamFailures.length > 0 ? 202 : 201).json(responseBody);
     } catch (error) {
       logger.error("Service request failed", {
         service: serviceName,
@@ -197,7 +257,7 @@ function createService({
   app.post("/events/sync", async (req, res) => {
     try {
       const { event } = req.body || {};
-      const { error } = eventSchema.validate(event);
+      const { error } = causalContextSchema.validate(event);
       if (error) {
         return res.status(400).json({ error: error.message });
       }
@@ -226,11 +286,36 @@ function createService({
 
   async function start() {
     try {
-      const clients = await createRedisClients(serviceName);
-      publisher = clients.publisher;
-      app.listen(port, () => {
+      redisClients = await createRedisClients(serviceName);
+      publisher = redisClients.publisher;
+      server = app.listen(port, () => {
         logger.info("Service started", { service: serviceName, port });
       });
+
+      const shutdown = async () => {
+        if (shuttingDown) {
+          return;
+        }
+
+        shuttingDown = true;
+        logger.info("Service shutting down", { service: serviceName });
+
+        if (server) {
+          await new Promise((resolve) => {
+            server.close(() => resolve());
+          });
+        }
+
+        if (redisClients) {
+          await Promise.allSettled([
+            redisClients.publisher?.quit?.(),
+            redisClients.subscriber?.quit?.()
+          ]);
+        }
+      };
+
+      process.once("SIGINT", shutdown);
+      process.once("SIGTERM", shutdown);
     } catch (error) {
       logger.error("Service bootstrap failed", { service: serviceName, error: error.message });
       process.exit(1);

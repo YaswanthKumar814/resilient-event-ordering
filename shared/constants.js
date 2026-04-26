@@ -26,6 +26,8 @@ const SERVICES = {
 };
 
 const SERVICE_ORDER = Object.keys(SERVICES);
+const SERVICE_COUNT = SERVICE_ORDER.length;
+const SERVICE_VECTOR_KEYS = SERVICE_ORDER.map((_, index) => String(index));
 
 const EVENT_TYPES = [
   "ORDER_PLACED",
@@ -40,6 +42,8 @@ const EVENT_CHANNEL = "events";
 module.exports = {
   SERVICES,
   SERVICE_ORDER,
+  SERVICE_COUNT,
+  SERVICE_VECTOR_KEYS,
   EVENT_TYPES,
   EVENT_CHANNEL
 };

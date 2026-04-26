@@ -1,6 +1,9 @@
+const { SERVICE_COUNT } = require("./constants");
+
 class VectorClock {
   constructor(size, ownIndex) {
-    this.clock = Array.from({ length: size }, () => 0);
+    const resolvedSize = Number.isInteger(size) && size > 0 ? size : SERVICE_COUNT;
+    this.clock = Array.from({ length: resolvedSize }, () => 0);
     this.ownIndex = ownIndex;
   }
 
@@ -32,7 +35,7 @@ class VectorClock {
     return this.clock.map((_, index) => Number(vector[index] || vector[String(index)] || 0));
   }
 
-  static compare(a = {}, b = {}, size = 4) {
+  static compare(a = {}, b = {}, size = SERVICE_COUNT) {
     const left = Array.from({ length: size }, (_, index) => Number(a[index] || a[String(index)] || 0));
     const right = Array.from({ length: size }, (_, index) => Number(b[index] || b[String(index)] || 0));
 

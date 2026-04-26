@@ -9,6 +9,9 @@ const EventRaw = require("./models/EventRaw");
 const EventOrdered = require("./models/EventOrdered");
 const { buildOrderedRecords } = require("./orderingEngine");
 
+function isDuplicateKeyError(error) {
+  return Boolean(error && error.code === 11000);
+}
 
 const app = express();
 app.use(
@@ -67,12 +70,6 @@ async function handleIncomingEvent(message) {
   }
 
   try {
-    const existing = await EventRaw.findOne({ event_id: value.event_id }).lean();
-    if (existing) {
-      logger.warn("Duplicate event ignored", { event_id: value.event_id });
-      return;
-    }
-
     await EventRaw.create({
       ...value,
       physical_timestamp: new Date(value.physical_timestamp)
@@ -86,6 +83,11 @@ async function handleIncomingEvent(message) {
 
     await persistOrderedTimeline(value.order_id);
   } catch (error) {
+    if (isDuplicateKeyError(error)) {
+      logger.warn("Duplicate event ignored", { event_id: value.event_id });
+      return;
+    }
+
     logger.error("Failed to persist event", {
       event_id: value.event_id,
       error: error.message
@@ -109,8 +111,32 @@ app.get("/events/raw", async (req, res) => {
 
 app.get("/events/ordered", async (req, res) => {
   try {
-    const events = await EventOrdered.find({}).sort({ order_index: 1, createdAt: 1 }).lean();
-    return res.json(events);
+    const events = await EventOrdered.find({})
+      .sort({
+        order_id: 1,
+        lamport_timestamp: 1,
+        service: 1,
+        createdAt: 1,
+        event_id: 1
+      })
+      .lean();
+
+    const orders = [];
+    let currentOrder = null;
+
+    for (const event of events) {
+      if (!currentOrder || currentOrder.order_id !== event.order_id) {
+        currentOrder = {
+          order_id: event.order_id,
+          events: []
+        };
+        orders.push(currentOrder);
+      }
+
+      currentOrder.events.push(event);
+    }
+
+    return res.json({ orders });
   } catch (error) {
     logger.error("Failed to fetch ordered events", { error: error.message });
     return res.status(500).json({ error: "Failed to fetch ordered events" });

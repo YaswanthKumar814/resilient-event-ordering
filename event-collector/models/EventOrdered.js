@@ -20,4 +20,8 @@ const EventOrderedSchema = new mongoose.Schema(
   }
 );
 
+EventOrderedSchema.index({ order_id: 1, order_index: 1 });
+EventOrderedSchema.index({ order_id: 1, createdAt: 1 });
+EventOrderedSchema.index({ lamport_timestamp: 1, service: 1, createdAt: 1 });
+
 module.exports = mongoose.models.EventOrdered || mongoose.model("EventOrdered", EventOrderedSchema);

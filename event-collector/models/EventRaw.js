@@ -17,4 +17,7 @@ const EventRawSchema = new mongoose.Schema(
   }
 );
 
+EventRawSchema.index({ order_id: 1, createdAt: 1 });
+EventRawSchema.index({ order_id: 1, lamport_timestamp: 1, service: 1, createdAt: 1 });
+
 module.exports = mongoose.models.EventRaw || mongoose.model("EventRaw", EventRawSchema);
